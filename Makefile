@@ -2,7 +2,7 @@
 # Makefile: C++23 Analytical Query Engine & Verification Suite
 # ==============================================================================
 
-CXX           ?= clang++-18
+CXX := clang++-18
 SANITIZE      ?= none
 
 # Baseline flags shared across all build profiles

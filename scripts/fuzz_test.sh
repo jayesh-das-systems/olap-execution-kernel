@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Work in a dedicated scratch directory
 FUZZ_DIR="/tmp/olap_fuzz_$$"
 mkdir -p "${FUZZ_DIR}"
 
@@ -10,37 +9,16 @@ trap 'rm -rf "${FUZZ_DIR}"' EXIT
 BUILD_DIR="./build"
 ORACLE="${BUILD_DIR}/naive_oracle"
 GEN="${BUILD_DIR}/generate_fuzz_case"
-ENGINE_RUNNER="./scripts/query.sh"
+ENGINE_BIN="${BUILD_DIR}/engine"
 
 echo "=========================================================="
 echo " [FUZZ] Building Test Drivers & Execution Kernel"
 echo "=========================================================="
-make -j"$(nproc)" "${ORACLE}" "${GEN}"
+make -j"$(nproc)" "${ORACLE}" "${GEN}" "${ENGINE_BIN}"
 
-if [[ ! -x "${ENGINE_RUNNER}" ]]; then
-    echo "Error: Query runner script not found or not executable: ${ENGINE_RUNNER}"
-    exit 1
-fi
-
-# 1. Critical row counts:
-#    - Sub-byte & sub-chunk boundaries (1, 7, 8, 9, 15, 16, 17)
-#    - Exact 1024-chunk multiples and +/-1 boundary edges (1023, 1024, 1025)
-#    - Multi-chunk remainders (2047, 2048, 2049, 3317, 10007)
 ROW_COUNTS=(1 7 8 9 15 16 17 1023 1024 1025 2047 2048 2049 3317 10007)
-
-# 2. Mask patterns:
-#    0: All Valid (0xFF)
-#    1: All Deleted (0x00)
-#    2: Alternating (0xAA)
-#    3: Pseudo-random bits
-#    4: Sparse edges
 PATTERNS=(0 1 2 3 4)
 
-# 3. Predicate combinations:
-#    - Broad int range + empty prefix
-#    - Tight int range + matching prefix
-#    - Negative int range
-#    - Out-of-bounds predicate (selectivity = 0%)
 declare -a TEST_CONFIGS=(
     "-500000:500000:"
     "10000:80000:APAC"
@@ -59,7 +37,6 @@ for N in "${ROW_COUNTS[@]}"; do
     for P in "${PATTERNS[@]}"; do
         TEST_FILE="${FUZZ_DIR}/dataset_${N}_p${P}.bin"
         
-        # Generate targeted edge-case binary dataset
         "${GEN}" "${TEST_FILE}" "${N}" "${P}" 1337 > /dev/null
 
         for CONFIG in "${TEST_CONFIGS[@]}"; do
@@ -82,22 +59,19 @@ for N in "${ROW_COUNTS[@]}"; do
                 --max-int "${MAX_INT}" \
                 "${PFX_ARGS[@]}" > "${ORACLE_RAW}"
 
-            # 2. Run vectorized production execution kernel
-            #    Pipes through --no-telemetry/--format tsv to isolate tabular reduction
-            "${ENGINE_RUNNER}" "${TEST_FILE}" \
+            # 2. Run engine directly (discard stderr telemetry, capture TSV from stdout)
+            "${ENGINE_BIN}" "${TEST_FILE}" \
                 --min-int "${MIN_INT}" \
                 --max-int "${MAX_INT}" \
                 "${PFX_ARGS[@]}" \
-                --group-by char \
-                --format tsv \
-                --no-telemetry > "${ENGINE_RAW}"
+                --group-by char 2>/dev/null > "${ENGINE_RAW}"
 
             # 3. Normalize outputs: preserve header, sort data lines by group key
-            head -n 1 "${ORACLE_RAW}" > "${ORACLE_NORM}"
-            tail -n +2 "${ORACLE_RAW}" | sort -k1,1 >> "${ORACLE_NORM}"
+            
+            sort -k1,1n "${ORACLE_RAW}" > "${ORACLE_NORM}"
 
-            head -n 1 "${ENGINE_RAW}" > "${ENGINE_NORM}"
-            tail -n +2 "${ENGINE_RAW}" | sort -k1,1 >> "${ENGINE_NORM}"
+            
+            sort -k1,1n "${ENGINE_RAW}" > "${ENGINE_NORM}"
 
             # 4. Strict byte-for-byte diff
             if ! diff -u "${ORACLE_NORM}" "${ENGINE_NORM}" > "${FUZZ_DIR}/diff.patch"; then

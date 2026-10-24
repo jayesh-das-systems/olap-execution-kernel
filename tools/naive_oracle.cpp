@@ -1,20 +1,16 @@
 #include <cstdint>
 #include <cstring>
-#include <fstream>
+#include <fcntl.h>
 #include <iostream>
 #include <map>
 #include <string>
 #include <string_view>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <unistd.h>
 #include <vector>
 
-#pragma pack(push, 1)
-struct FileHeader {
-    char magic[4];          // "OLAP"
-    uint32_t version;       // Format version
-    uint64_t row_count;     // Total tuples in file
-    uint64_t data_offset;   // Offset to raw columnar blocks
-};
-#pragma pack(pop)
+#include "storage/file_format.hpp"
 
 struct QueryParams {
     std::string filepath;
@@ -28,8 +24,8 @@ struct QueryParams {
 void print_usage(const char* prog) {
     std::cerr << "Usage: " << prog << " <dataset.bin> [options]\n"
               << "Options:\n"
-              << "  --min-int <val>      Minimum integer filter (inclusive)\n"
-              << "  --max-int <val>      Maximum integer filter (inclusive)\n"
+              << "  --min-int <val>      Minimum integer filter\n"
+              << "  --max-int <val>      Maximum integer filter\n"
               << "  --str-prefix <val>   String prefix filter\n";
 }
 
@@ -56,56 +52,58 @@ int main(int argc, char* argv[]) {
         }
     }
 
-    std::ifstream file(params.filepath, std::ios::binary);
-    if (!file) {
+    int fd = ::open(params.filepath.c_str(), O_RDONLY | O_CLOEXEC);
+    if (fd < 0) {
         std::cerr << "Error: Failed to open file: " << params.filepath << "\n";
         return 1;
     }
 
-    FileHeader header{};
-    file.read(reinterpret_cast<char*>(&header), sizeof(FileHeader));
-    if (!file || std::memcmp(header.magic, "OLAP", 4) != 0) {
-        std::cerr << "Error: Invalid binary file format or magic header\n";
+    struct stat st{};
+    if (::fstat(fd, &st) != 0 || st.st_size < static_cast<off_t>(sizeof(engine::ColumnarFileHeader))) {
+        std::cerr << "Error: File truncated or inaccessible\n";
+        ::close(fd);
         return 1;
     }
 
-    const uint64_t n = header.row_count;
-
-    // Direct scalar buffers matching raw columnar storage layout
-    std::vector<int64_t> col_int(n);
-    std::vector<char> col_char(n);
-    std::vector<char> col_str(n * 16);
-    const size_t mask_bytes = (n + 7) / 8;
-    std::vector<uint8_t> col_mask(mask_bytes);
-
-    file.seekg(header.data_offset);
-    file.read(reinterpret_cast<char*>(col_int.data()), n * sizeof(int64_t));
-    file.read(reinterpret_cast<char*>(col_char.data()), n * sizeof(char));
-    file.read(reinterpret_cast<char*>(col_str.data()), n * 16);
-    file.read(reinterpret_cast<char*>(col_mask.data()), mask_bytes);
-
-    if (!file) {
-        std::cerr << "Error: Truncated binary data encountered\n";
+    const size_t file_size = static_cast<size_t>(st.st_size);
+    void* mapped = ::mmap(nullptr, file_size, PROT_READ, MAP_PRIVATE, fd, 0);
+    if (mapped == MAP_FAILED) {
+        std::cerr << "Error: mmap failed\n";
+        ::close(fd);
         return 1;
     }
+
+    const auto* header = reinterpret_cast<const engine::ColumnarFileHeader*>(mapped);
+    if (header->magic != 0x4854454E || header->version != 3) {
+        std::cerr << "Error: Invalid file format or version\n";
+        ::munmap(mapped, file_size);
+        ::close(fd);
+        return 1;
+    }
+
+    const uint64_t n = header->row_count;
+    const auto* base = static_cast<const uint8_t*>(mapped);
+
+    const auto* col_int = reinterpret_cast<const int64_t*>(base + header->int_col_offset);
+    const auto* col_char = reinterpret_cast<const char*>(base + header->char_col_offset);
+    const auto* col_str = reinterpret_cast<const engine::StringRef*>(base + header->str_col_offset);
+    const auto* col_metric = reinterpret_cast<const int64_t*>(base + header->metric_col_offset);
+    const auto* str_pool = reinterpret_cast<const char*>(base + header->string_pool_offset);
+    const auto* live_mask = reinterpret_cast<const uint8_t*>(base + header->live_mask_offset);
 
     struct AggResult {
         uint64_t count = 0;
         int64_t sum = 0;
     };
-    // Map with unsigned char key prevents sign-extension index faults
-    std::map<unsigned char, AggResult> oracle_groups;
+    std::map<uint64_t, AggResult> oracle_groups;
 
-    // Strict scalar reference evaluation loop
     for (uint64_t i = 0; i < n; ++i) {
-        // 1. Bitmask check: row >> 3 for byte index, row & 7 for bit index
-        const uint8_t byte = col_mask[i >> 3];
+        // 1. Bitmask check on live_mask
+        const uint8_t byte = live_mask[i >> 3];
         const bool is_live = (byte >> (i & 7)) & 1;
-        if (!is_live) {
-            continue;
-        }
+        if (!is_live) continue;
 
-        // 2. Integer range predicate
+        // 2. Integer filter
         const int64_t int_val = col_int[i];
         if (params.filter_int) {
             if (int_val < params.min_int || int_val > params.max_int) {
@@ -113,25 +111,27 @@ int main(int argc, char* argv[]) {
             }
         }
 
-        // 3. Fixed-width 16-byte string prefix check
+        // 3. String prefix filter
         if (params.filter_str) {
-            const char* str_ptr = &col_str[i * 16];
-            if (std::strncmp(str_ptr, params.str_prefix.c_str(), params.str_prefix.size()) != 0) {
+            const engine::StringRef ref = col_str[i];
+            std::string_view val(str_pool + ref.offset, ref.length);
+            if (!val.starts_with(params.str_prefix)) {
                 continue;
             }
         }
 
-        // 4. Scalar accumulation into map
-        const auto key = static_cast<unsigned char>(col_char[i]);
+        // 4. Scalar accumulation matching DirectCharAccumulator (char code as uint64_t)
+        const auto key = static_cast<uint64_t>(static_cast<unsigned char>(col_char[i]));
         oracle_groups[key].count++;
-        oracle_groups[key].sum += int_val;
+        oracle_groups[key].sum += col_metric[i];
     }
 
-    // Emit TSV output matching query engine output
-    std::cout << "GROUP_KEY\tCOUNT\tSUM\n";
+    // Match engine format: <key_hash>\t<agg_result>\t<agg_count>\n
     for (const auto& [key, agg] : oracle_groups) {
-        std::cout << static_cast<char>(key) << "\t" << agg.count << "\t" << agg.sum << "\n";
+        std::cout << key << "\t" << agg.sum << "\t" << agg.count << "\n";
     }
 
+    ::munmap(mapped, file_size);
+    ::close(fd);
     return 0;
 }
