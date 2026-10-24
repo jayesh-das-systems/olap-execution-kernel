@@ -3,7 +3,7 @@
 [![Language](https://img.shields.io/badge/C%2B%2B-23-blue.svg?style=flat-square&logo=c%2B%2B)](https://en.cppreference.com/w/cpp/23)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg?style=flat-square)](LICENSE)
 [![Platform](https://img.shields.io/badge/Platform-Linux%20x86__64-orange.svg?style=flat-square&logo=linux)](https://kernel.org)
-[![Compiler](https://img.shields.io/badge/Compiler-Clang%2018%20%7C%20GCC%2013%2B-purple.svg?style=flat-square)](https://llvm.org)
+[![Compiler](https://img.shields.io/badge/Compiler-Clang%2018%20%7C%20GCC%2014%2B-purple.svg?style=flat-square)](https://llvm.org)
 
 An ultra-high-throughput, zero-copy OLAP vectorized query execution engine engineered in modern ISO C++23.
 
