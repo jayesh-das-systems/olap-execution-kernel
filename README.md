@@ -84,6 +84,15 @@ A conforming ISO C++23 toolchain with `<expected>` support is strictly required:
 * **Build System:** GNU Make 4.0+
 * **Libraries:** POSIX threads (`-lpthread`)
 
+## Toolchain & Compiler Philosophy
+
+This engine is built and verified primarily against **LLVM Clang 18 with `libc++`**, enforcing strict ISO C++23 compliance, rigorous diagnostic checks, and clean memory models without relying on GCC-specific header leakage or compiler extensions.
+
+* **Primary Toolchain:** `clang++-18` with `-stdlib=libc++` (Strict conformance & optimization baseline)
+* **Secondary Toolchain:** `g++-13`+ (Compatible fallback)
+* **Build System:** GNU Make 4.0+
+* **Target Architecture:** Linux x86_64
+
 ---
 
 ## Quickstart
