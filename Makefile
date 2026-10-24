@@ -1,15 +1,15 @@
 # ==============================================================================
-# Makefile: C++23 Analytical Query Engine & Pre-flight Admission Gate Suite
+# Makefile: C++23 Analytical Query Engine & Verification Suite
 # ==============================================================================
 
-CXX          ?= g++
-SANITIZE     ?= none
+CXX           ?= clang++-18
+SANITIZE      ?= none
 
 # Baseline flags shared across all build profiles
-COMMON_FLAGS := -std=c++23 -march=native \
-                -Wall -Wextra -Wpedantic -Wconversion -Wshadow \
-                -fno-omit-frame-pointer \
-                -Iinclude
+COMMON_FLAGS  := -std=c++23 -march=native \
+                 -Wall -Wextra -Wpedantic -Wconversion -Wshadow \
+                 -fno-omit-frame-pointer \
+                 -Iinclude
 
 # Profile configurations
 RELEASE_FLAGS := -O3 -DNDEBUG
@@ -32,33 +32,41 @@ ifneq (,$(findstring clang++,$(CXX)))
     CXXFLAGS += -stdlib=libc++
 endif
 
-BUILD_DIR    := build
-SRC_DIR      := src
-TESTS_DIR    := tests
-SCRIPTS_DIR  := scripts
-INCLUDE_DIR  := include
+BUILD_DIR     := build
+SRC_DIR       := src
+TESTS_DIR     := tests
+TOOLS_DIR     := tools
+SCRIPTS_DIR   := scripts
+INCLUDE_DIR   := include
 
-# Output binaries
-ENGINE_BIN   := $(BUILD_DIR)/engine
-HW_GATE_BIN  := $(BUILD_DIR)/test_hw_env
-CORR_GATE_BIN:= $(BUILD_DIR)/test_correctness
-GEN_BIN      := $(BUILD_DIR)/generate_dataset
+# Core Engine & Gate Binaries
+ENGINE_BIN    := $(BUILD_DIR)/engine
+HW_GATE_BIN   := $(BUILD_DIR)/test_hw_env
+CORR_GATE_BIN := $(BUILD_DIR)/test_correctness
+MUT_TEST_BIN  := $(BUILD_DIR)/test_mutations
 
-HEADERS      := $(shell find $(INCLUDE_DIR) -type f -name '*.hpp')
-GEN_SRC      := $(firstword $(wildcard tools/generate_dataset.cpp generator_dataset.cpp))
+# Tooling, Oracles & Fuzz Generators
+GEN_BIN       := $(BUILD_DIR)/generate_dataset
+ORACLE_BIN    := $(BUILD_DIR)/naive_oracle
+FUZZ_GEN_BIN  := $(BUILD_DIR)/generate_fuzz_case
 
-.PHONY: all clean run-gates check asan ubsan san dev-check help
+HEADERS       := $(shell find $(INCLUDE_DIR) -type f -name '*.hpp')
+
+ALL_BINARIES  := $(ENGINE_BIN) $(HW_GATE_BIN) $(CORR_GATE_BIN) $(MUT_TEST_BIN) \
+                 $(GEN_BIN) $(ORACLE_BIN) $(FUZZ_GEN_BIN)
+
+.PHONY: all clean run-gates check fuzz asan ubsan san dev-check help
 
 # Default release target: compiles everything at -O3 without sanitizer overhead
-all: $(ENGINE_BIN) $(HW_GATE_BIN) $(CORR_GATE_BIN) $(GEN_BIN)
-	@chmod +x $(SCRIPTS_DIR)/run_gates.sh $(SCRIPTS_DIR)/query.sh 2>/dev/null || true
-	@echo "Build complete [SANITIZE=$(SANITIZE)]. All binaries generated in $(BUILD_DIR)/"
+all: $(ALL_BINARIES)
+	@chmod +x $(SCRIPTS_DIR)/run_gates.sh $(SCRIPTS_DIR)/query.sh $(SCRIPTS_DIR)/fuzz_test.sh 2>/dev/null || true
+	@echo "Build complete [CXX=$(CXX), SANITIZE=$(SANITIZE)]. All binaries generated in $(BUILD_DIR)/"
 
 $(BUILD_DIR):
 	@mkdir -p $(BUILD_DIR)
 
 # ------------------------------------------------------------------------------
-# Target Compilations
+# Target Compilations: Engine & Test Gates
 # ------------------------------------------------------------------------------
 
 $(ENGINE_BIN): $(SRC_DIR)/main.cpp $(HEADERS) | $(BUILD_DIR)
@@ -73,19 +81,40 @@ $(CORR_GATE_BIN): $(TESTS_DIR)/test_correctness.cpp $(HEADERS) | $(BUILD_DIR)
 	@echo "==> Compiling Tier 2 Correctness Gate: $@"
 	$(CXX) $(CXXFLAGS) $< -o $@
 
-$(GEN_BIN): $(GEN_SRC) $(HEADERS) | $(BUILD_DIR)
-	@echo "==> Compiling Synthetic Data Generator: $@"
+$(MUT_TEST_BIN): $(TESTS_DIR)/test_mutations.cpp $(HEADERS) | $(BUILD_DIR)
+	@echo "==> Compiling Mutation & Invariant Gate: $@"
 	$(CXX) $(CXXFLAGS) $< -o $@
 
 # ------------------------------------------------------------------------------
-# Standard Gate Targets
+# Target Compilations: Verification Tooling & Oracles
 # ------------------------------------------------------------------------------
 
-run-gates: $(HW_GATE_BIN) $(CORR_GATE_BIN)
+$(GEN_BIN): $(TOOLS_DIR)/generate_dataset.cpp $(HEADERS) | $(BUILD_DIR)
+	@echo "==> Compiling Synthetic Data Generator: $@"
+	$(CXX) $(CXXFLAGS) $< -o $@
+
+$(ORACLE_BIN): $(TOOLS_DIR)/naive_oracle.cpp | $(BUILD_DIR)
+	@echo "==> Compiling Scalar Reference Oracle: $@"
+	$(CXX) $(CXXFLAGS) $< -o $@
+
+$(FUZZ_GEN_BIN): $(TOOLS_DIR)/generate_fuzz_case.cpp | $(BUILD_DIR)
+	@echo "==> Compiling Edge-Case Fuzz Generator: $@"
+	$(CXX) $(CXXFLAGS) $< -o $@
+
+# ------------------------------------------------------------------------------
+# Verification & Operational Gates
+# ------------------------------------------------------------------------------
+
+run-gates: $(HW_GATE_BIN) $(CORR_GATE_BIN) $(MUT_TEST_BIN)
 	@bash $(SCRIPTS_DIR)/run_gates.sh
 
 check: all run-gates
 	@echo "All pre-flight operational gates passed successfully."
+
+# Differential fuzzing matrix across row remainder edges & bitmask permutations
+fuzz: $(ENGINE_BIN) $(ORACLE_BIN) $(FUZZ_GEN_BIN)
+	@chmod +x $(SCRIPTS_DIR)/fuzz_test.sh
+	@bash $(SCRIPTS_DIR)/fuzz_test.sh
 
 # ------------------------------------------------------------------------------
 # Developer Sanitizer Profiles (Opt-in)
@@ -107,9 +136,10 @@ san:
 	@echo "[COMBO BUILD] Clean build with ASan + UBSan complete."
 
 dev-check: asan
-	@echo "==> Executing Tier 1 & 2 gates under AddressSanitizer..."
-	./build/test_hw_env
-	./build/test_correctness
+	@echo "==> Executing pre-flight gates under AddressSanitizer..."
+	./$(HW_GATE_BIN)
+	./$(CORR_GATE_BIN)
+	./$(MUT_TEST_BIN)
 	@echo "[ASAN PASS] Pre-flight admission verified under AddressSanitizer."
 
 clean:
@@ -118,10 +148,11 @@ clean:
 
 help:
 	@echo "Available make targets:"
-	@echo "  make                      - Production build (-O3 -DNDEBUG, zero runtime checks)"
-	@echo "  make asan                 - Recompile all targets with AddressSanitizer (-fsanitize=address -g -O1)"
-	@echo "  make ubsan                - Recompile all targets with UBSan (-fsanitize=undefined -g -O1)"
-	@echo "  make san                  - Recompile all targets with both ASan and UBSan"
-	@echo "  make dev-check            - Recompile with ASan and immediately execute hardware & correctness gates"
-	@echo "  make check                - Run admission gates against the current build"
-	@echo "  make clean                - Wipe the build/ directory"
+	@echo "  make                 - Production build (-O3 -DNDEBUG, zero runtime checks)"
+	@echo "  make fuzz            - Run differential matrix against scalar reference oracle"
+	@echo "  make check           - Run admission gates against the current build"
+	@echo "  make asan            - Recompile all targets with AddressSanitizer"
+	@echo "  make ubsan           - Recompile all targets with UndefinedBehaviorSanitizer"
+	@echo "  make san             - Recompile all targets with both ASan and UBSan"
+	@echo "  make dev-check       - Recompile with ASan and run hardware & correctness gates"
+	@echo "  make clean           - Wipe the build/ directory"
