@@ -13,19 +13,24 @@
 #include <memory>
 #include <cstdint>
 #include <cstddef>
+#include <type_traits>
 
 #if !defined(__cpp_lib_expected) || __cpp_lib_expected < 202202L
 #error "FATAL: ISO C++23 <expected> (P0323R12) required."
 #endif
 
-#if !defined(__cpp_explicit_this_parameter) || __cpp_explicit_this_parameter < 202110L
-#error "FATAL: ISO C++23 Deducing this (P0847R7) required."
+// Check for deducing this: Clang 18+ implements P0847R7. 
+// Some libc++ / clang builds don't predefine __cpp_explicit_this_parameter.
+#if defined(__clang__)
+  #if __clang_major__ < 18
+    #error "FATAL: Clang 18+ required for C++23 explicit object parameters (deducing this)."
+  #endif
+#elif !defined(__cpp_explicit_this_parameter) || __cpp_explicit_this_parameter < 202110L
+  #error "FATAL: ISO C++23 Deducing this (P0847R7) required."
 #endif
 
 namespace engine {
 
-// Polyfill std::start_lifetime_as for libstdc++ implementations (like GCC 14) 
-// that support C++23 core language but lack WG21 P2590R2 library macros.
 #if defined(__cpp_lib_start_lifetime_as) && __cpp_lib_start_lifetime_as >= 202207L
     using std::start_lifetime_as;
     using std::start_lifetime_as_array;
@@ -75,7 +80,7 @@ inline constexpr size_t VECTOR_BATCH_MASK = VECTOR_BATCH_SIZE - 1uz;
 
 inline constexpr uint64_t MAX_STRING_POOL_CAPACITY = 0xFFFFFFFFuz;
 
-[[nodiscard]] inline constexpr bool is_cache_aligned(const void* ptr) noexcept {
+[[nodiscard]] inline bool is_cache_aligned(const void* ptr) noexcept {
     return (reinterpret_cast<uintptr_t>(ptr) & CACHE_LINE_MASK) == 0uz;
 }
 

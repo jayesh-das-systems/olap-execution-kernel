@@ -63,7 +63,7 @@ int main(int argc, char* argv[]) {
     std::cout << "[DATA-GEN] Generating " << total_rows << " columnar rows...\n";
 
     // 1. Calculate Schema Offsets and Alignment
-    const uint64_t validity_bytes = engine::calculate_validity_bytes(total_rows);[cite: 1]
+    const uint64_t validity_bytes = engine::calculate_validity_bytes(total_rows);
     
     const std::vector<std::string> sample_strings = {
         "APAC_REVENUE_METRIC",
@@ -79,7 +79,7 @@ int main(int argc, char* argv[]) {
     }
     string_pool_size = align_to_64(string_pool_size);
 
-    uint64_t cursor = sizeof(engine::ColumnarFileHeader); // 128 bytes[cite: 1]
+    uint64_t cursor = sizeof(engine::ColumnarFileHeader); // 128 bytes
     
     cursor = align_to_64(cursor);
     const uint64_t int_col_offset = cursor;
@@ -89,7 +89,7 @@ int main(int argc, char* argv[]) {
     cursor += align_to_64(total_rows * sizeof(char));
 
     const uint64_t str_col_offset = cursor;
-    cursor += align_to_64(total_rows * sizeof(engine::StringRef));[cite: 1]
+    cursor += align_to_64(total_rows * sizeof(engine::StringRef));
 
     const uint64_t metric_col_offset = cursor;
     cursor += align_to_64(total_rows * sizeof(int64_t));
@@ -121,24 +121,24 @@ int main(int argc, char* argv[]) {
         return engine::to_underlying(engine::EngineExitCode::ERR_IO_READ_FAILED);
     }
 
-    // 3. Assemble and Write 128-Byte File Header[cite: 1]
-    engine::ColumnarFileHeader header{};[cite: 1]
-    header.magic = 0x4854454E; // "NETH"[cite: 1]
-    header.version = 3;[cite: 1]
-    header.row_count = total_rows;[cite: 1]
+    // 3. Assemble and Write 128-Byte File Header
+    engine::ColumnarFileHeader header{};
+    header.magic = 0x4854454E; // "NETH"
+    header.version = 3;
+    header.row_count = total_rows;
 
-    header.int_col_offset = int_col_offset;[cite: 1]
-    header.char_col_offset = char_col_offset;[cite: 1]
-    header.str_col_offset = str_col_offset;[cite: 1]
-    header.metric_col_offset = metric_col_offset;[cite: 1]
-    header.string_pool_offset = string_pool_offset;[cite: 1]
-    header.string_pool_size = string_pool_size;[cite: 1]
+    header.int_col_offset = int_col_offset;
+    header.char_col_offset = char_col_offset;
+    header.str_col_offset = str_col_offset;
+    header.metric_col_offset = metric_col_offset;
+    header.string_pool_offset = string_pool_offset;
+    header.string_pool_size = string_pool_size;
 
-    header.int_validity_offset = int_val_offset;[cite: 1]
-    header.char_validity_offset = char_val_offset;[cite: 1]
-    header.str_validity_offset = str_val_offset;[cite: 1]
-    header.metric_validity_offset = metric_val_offset;[cite: 1]
-    header.live_mask_offset = live_mask_offset;[cite: 1]
+    header.int_validity_offset = int_val_offset;
+    header.char_validity_offset = char_val_offset;
+    header.str_validity_offset = str_val_offset;
+    header.metric_validity_offset = metric_val_offset;
+    header.live_mask_offset = live_mask_offset;
 
     write_exact(fd, &header, sizeof(header));
     pad_zeros_until(fd, sizeof(header), int_col_offset);
@@ -175,30 +175,30 @@ int main(int argc, char* argv[]) {
         pad_zeros_until(fd, char_col_offset + total_rows * sizeof(char), str_col_offset);
     }
 
-    // 6. Stream Column: str_col[cite: 1]
+    // 6. Stream Column: str_col
     std::cout << "[DATA-GEN] Streaming StringRef column...\n";
     {
-        std::vector<engine::StringRef> vocab_refs;[cite: 1]
+        std::vector<engine::StringRef> vocab_refs;
         uint32_t pool_cursor = 0;
         for (const auto& s : sample_strings) {
-            vocab_refs.push_back(engine::StringRef{[cite: 1]
+            vocab_refs.push_back(engine::StringRef{
                 .offset = pool_cursor,
                 .length = static_cast<uint32_t>(s.size())
             });
             pool_cursor += static_cast<uint32_t>(s.size());
         }
 
-        std::vector<engine::StringRef> chunk(WRITE_CHUNK_ROWS);[cite: 1]
+        std::vector<engine::StringRef> chunk(WRITE_CHUNK_ROWS);
         uint64_t written_rows = 0uz;
         while (written_rows < total_rows) {
             const size_t n = std::min(WRITE_CHUNK_ROWS, total_rows - written_rows);
             for (size_t i = 0uz; i < n; ++i) {
                 chunk[i] = vocab_refs[(written_rows + i) % vocab_refs.size()];
             }
-            write_exact(fd, chunk.data(), n * sizeof(engine::StringRef));[cite: 1]
+            write_exact(fd, chunk.data(), n * sizeof(engine::StringRef));
             written_rows += n;
         }
-        pad_zeros_until(fd, str_col_offset + total_rows * sizeof(engine::StringRef), metric_col_offset);[cite: 1]
+        pad_zeros_until(fd, str_col_offset + total_rows * sizeof(engine::StringRef), metric_col_offset);
     }
 
     // 7. Stream Column: metric_col

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "schema.hpp"
+#include "storage/schema.hpp"
 #include "vector_chunk.hpp"
 #include <cstdint>
 #include <cassert>
@@ -9,6 +9,7 @@
 #include <limits>
 #include <expected>
 #include <span>
+#include <cstring>
 
 namespace engine {
 
@@ -120,6 +121,44 @@ inline void refine_filter_char(size_t batch_offset,
     sel.count = matches;
 }
 
+[[nodiscard]] inline bool fast_prefix_match(const char* str_ptr, uint32_t str_len, std::string_view prefix) noexcept {
+    const size_t plen = prefix.size();
+    if (str_len < plen) [[unlikely]] {
+        return false;
+    }
+
+    // 4-byte prefix specialization (e.g. "APAC") -> single 32-bit register scalar load & cmp
+    if (plen == 4uz) {
+        uint32_t a = 0;
+        uint32_t b = 0;
+        std::memcpy(&a, str_ptr, sizeof(uint32_t));
+        std::memcpy(&b, prefix.data(), sizeof(uint32_t));
+        return a == b;
+    }
+
+    // 8-byte prefix specialization -> single 64-bit register scalar load & cmp
+    if (plen == 8uz) {
+        uint64_t a = 0;
+        uint64_t b = 0;
+        std::memcpy(&a, str_ptr, sizeof(uint64_t));
+        std::memcpy(&b, prefix.data(), sizeof(uint64_t));
+        return a == b;
+    }
+
+    // 1..3 byte prefixes via bitmasked 32-bit load to avoid call trampolines
+    if (plen > 0uz && plen < 4uz) {
+        const uint32_t mask = (1U << (plen * 8uz)) - 1U;
+        uint32_t a = 0;
+        uint32_t b = 0;
+        std::memcpy(&a, str_ptr, plen);
+        std::memcpy(&b, prefix.data(), plen);
+        return (a & mask) == (b & mask);
+    }
+
+    // Fallback using compiler built-in
+    return __builtin_memcmp(str_ptr, prefix.data(), plen) == 0;
+}
+
 inline void refine_filter_string(size_t batch_offset,
                                  std::string_view prefix,
                                  SelectionVector& sel) noexcept {
@@ -146,8 +185,7 @@ inline void refine_filter_string(size_t batch_offset,
 
         const StringRef& ref = g_state.str_col[row];
         if (static_cast<uint64_t>(ref.offset) + ref.length <= active_pool_bytes) {
-            std::string_view val_view{pool + ref.offset, ref.length};
-            if (val_view.starts_with(prefix)) {
+            if (fast_prefix_match(pool + ref.offset, ref.length, prefix)) {
                 sel.indices[matches++] = idx;
             }
         }

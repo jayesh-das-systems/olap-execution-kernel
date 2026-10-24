@@ -130,7 +130,7 @@ struct alignas(64) GlobalExecutionState {
 
 inline GlobalExecutionState g_state{};
 
-[[nodiscard]] inline constexpr bool is_row_live(uint64_t row) noexcept {
+[[nodiscard]] inline bool is_row_live(uint64_t row) noexcept {
     if (g_state.live_mask == nullptr) return false;
     return (row >= g_state.head_idx) &&
            (row < g_state.tail_idx) &&

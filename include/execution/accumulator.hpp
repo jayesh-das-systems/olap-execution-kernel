@@ -1,6 +1,6 @@
 #pragma once
 
-#include "schema.hpp"
+#include "storage/schema.hpp"
 #include "vector_chunk.hpp"
 #include <vector>
 #include <cstdint>

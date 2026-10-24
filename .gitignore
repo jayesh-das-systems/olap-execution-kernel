@@ -12,3 +12,5 @@ test_data.bin
 *.swp
 *~
 .DS_Store
+cachegrind.out.*
+llvm.sh

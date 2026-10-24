@@ -4,9 +4,9 @@
 #error "FATAL: This engine strictly requires an ISO C++23 compliant compiler."
 #endif
 
-#include "exit_codes.hpp"
-#include "hardware_config.hpp"
-#include "schema.hpp"
+#include "common/exit_codes.hpp"
+#include "common/hardware_config.hpp"
+#include "storage/schema.hpp"
 
 #include <sys/mman.h>
 #include <sys/stat.h>
@@ -19,6 +19,7 @@
 #include <iostream>
 #include <memory>
 #include <utility>
+#include <string_view>
 
 namespace engine {
 
@@ -141,7 +142,7 @@ private:
             return EngineExitCode::ERR_ALIGNMENT_FAULT;
         }
 
-        header_ = std::start_lifetime_as<ColumnarFileHeader>(mapped_addr_);
+        header_ = engine::start_lifetime_as<ColumnarFileHeader>(mapped_addr_);
 
         if (header_->magic != 0x4854454E) { // "NETH"
             std::cerr << "[SCHEMA ERROR] Magic mismatch: expected 0x4854454E ('NETH'), found 0x"
@@ -204,31 +205,31 @@ private:
         g_state.is_read_only = true;
 
         if (row_count > 0uz) {
-            g_state.int_col = std::start_lifetime_as_array<int64_t>(
+            g_state.int_col = engine::start_lifetime_as_array<int64_t>(
                 base_bytes + header_->int_col_offset, row_count);
-            g_state.char_col = std::start_lifetime_as_array<char>(
+            g_state.char_col = engine::start_lifetime_as_array<char>(
                 base_bytes + header_->char_col_offset, row_count);
-            g_state.str_col = std::start_lifetime_as_array<StringRef>(
+            g_state.str_col = engine::start_lifetime_as_array<StringRef>(
                 base_bytes + header_->str_col_offset, row_count);
-            g_state.metric_col = std::start_lifetime_as_array<int64_t>(
+            g_state.metric_col = engine::start_lifetime_as_array<int64_t>(
                 base_bytes + header_->metric_col_offset, row_count);
         }
 
         if (validity_bytes > 0uz) {
-            g_state.int_validity = std::start_lifetime_as_array<uint8_t>(
+            g_state.int_validity = engine::start_lifetime_as_array<uint8_t>(
                 base_bytes + header_->int_validity_offset, validity_bytes);
-            g_state.char_validity = std::start_lifetime_as_array<uint8_t>(
+            g_state.char_validity = engine::start_lifetime_as_array<uint8_t>(
                 base_bytes + header_->char_validity_offset, validity_bytes);
-            g_state.str_validity = std::start_lifetime_as_array<uint8_t>(
+            g_state.str_validity = engine::start_lifetime_as_array<uint8_t>(
                 base_bytes + header_->str_validity_offset, validity_bytes);
-            g_state.metric_validity = std::start_lifetime_as_array<uint8_t>(
+            g_state.metric_validity = engine::start_lifetime_as_array<uint8_t>(
                 base_bytes + header_->metric_validity_offset, validity_bytes);
-            g_state.live_mask = std::start_lifetime_as_array<uint8_t>(
+            g_state.live_mask = engine::start_lifetime_as_array<uint8_t>(
                 base_bytes + header_->live_mask_offset, validity_bytes);
         }
 
         g_state.string_pool_base = (header_->string_pool_size > 0uz)
-            ? std::start_lifetime_as_array<char>(base_bytes + header_->string_pool_offset, header_->string_pool_size)
+            ? engine::start_lifetime_as_array<char>(base_bytes + header_->string_pool_offset, header_->string_pool_size)
             : nullptr;
         g_state.string_pool_offset = header_->string_pool_size;
         g_state.string_pool_capacity = header_->string_pool_size;

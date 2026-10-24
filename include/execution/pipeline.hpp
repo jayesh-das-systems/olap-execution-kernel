@@ -4,9 +4,9 @@
 #error "FATAL: This engine strictly requires an ISO C++23 compliant compiler."
 #endif
 
-#include "exit_codes.hpp"
-#include "hardware_config.hpp"
-#include "schema.hpp"
+#include "common/exit_codes.hpp"
+#include "common/hardware_config.hpp"
+#include "storage/schema.hpp"
 #include "vector_chunk.hpp"
 #include "expression.hpp"
 #include "accumulator.hpp"
@@ -49,7 +49,7 @@ public:
                                                 std::vector<OutputRow>& out_results) noexcept {
         out_results.clear();
 
-        if (g_state.row_count == 0uz) {
+        if (g_state.head_idx >= g_state.tail_idx) {
             return EngineExitCode::SUCCESS;
         }
 
@@ -77,9 +77,11 @@ private:
         DirectCharAccumulator accum;
         SelectionVector sel;
 
-        const size_t total_rows = g_state.tail_idx;
-        for (size_t offset = g_state.head_idx; offset < total_rows; offset += VECTOR_SIZE) {
-            const size_t batch_size = std::min(VECTOR_SIZE, total_rows - offset);
+        const size_t start_idx = g_state.head_idx;
+        const size_t end_idx   = g_state.tail_idx;
+
+        for (size_t offset = start_idx; offset < end_idx; offset += VECTOR_SIZE) {
+            const size_t batch_size = std::min(VECTOR_SIZE, end_idx - offset);
 
             filter_int_batch(offset, batch_size, plan.predicate.int_min, plan.predicate.int_max, sel);
             if (sel.empty()) continue;
@@ -122,9 +124,11 @@ private:
         SelectionVector sel;
         HashVector hv;
 
-        const size_t total_rows = g_state.tail_idx;
-        for (size_t offset = g_state.head_idx; offset < total_rows; offset += VECTOR_SIZE) {
-            const size_t batch_size = std::min(VECTOR_SIZE, total_rows - offset);
+        const size_t start_idx = g_state.head_idx;
+        const size_t end_idx   = g_state.tail_idx;
+
+        for (size_t offset = start_idx; offset < end_idx; offset += VECTOR_SIZE) {
+            const size_t batch_size = std::min(VECTOR_SIZE, end_idx - offset);
 
             filter_int_batch(offset, batch_size, plan.predicate.int_min, plan.predicate.int_max, sel);
             if (sel.empty()) continue;

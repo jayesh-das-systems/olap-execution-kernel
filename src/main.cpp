@@ -1,9 +1,9 @@
-#include "include/common/exit_codes.hpp"
-#include "include/common/hardware_config.hpp"
-#include "include/storage/schema.hpp"
-#include "include/storage/file_format.hpp"
-#include "include/execution/pipeline.hpp"
-#include "include/output/tsv_emitter.hpp"
+#include "common/exit_codes.hpp"
+#include "common/hardware_config.hpp"
+#include "storage/schema.hpp"
+#include "storage/file_format.hpp"
+#include "execution/pipeline.hpp"
+#include "output/tsv_emitter.hpp"
 
 #include <iostream>
 #include <string_view>
