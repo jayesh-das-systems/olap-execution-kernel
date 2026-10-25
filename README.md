@@ -92,7 +92,7 @@ olap-execution-kernel/
 A conforming ISO C++23 toolchain with `<expected>` support is strictly required:
 
 - **OS**: Linux Kernel 5.4+ (x86_64)
-- **Compiler**: `clang++-18` (with `-stdlib=libc++`) or `g++-13+`
+- **Compiler**: `clang++-18` (with `-stdlib=libc++`) or `g++-14+`
 - **Build System**: GNU Make 4.0+
 - **Libraries**: POSIX threads (`-lpthread`)
 
@@ -101,7 +101,7 @@ A conforming ISO C++23 toolchain with `<expected>` support is strictly required:
 This engine is built and verified primarily against LLVM Clang 18 with `libc++`, enforcing strict ISO C++23 compliance, rigorous diagnostic checks, and clean memory models without relying on GCC-specific header leakage or compiler extensions.
 
 - **Primary Toolchain**: `clang++-18` with `-stdlib=libc++` (Strict conformance & optimization baseline)
-- **Secondary Toolchain**: `g++-13+` (Compatible fallback)
+- **Secondary Toolchain**: `g++-14+` (Compatible fallback)
 - **Target Architecture**: Linux x86_64
 
 ---
