@@ -76,6 +76,7 @@ olap-execution-kernel/
 │   ├── generate_fuzz_case.cpp   # Differential fuzz testcase generator
 │   └── naive_oracle.cpp         # Scalar baseline verification oracle
 ├── scripts/
+|   ├── fuzz_test.sh
 │   ├── query.sh                 # End-to-end admission gate and query execution wrapper
 │   └── run_gates.sh             # Admission gate runner
 ├── demo.gif                     # Terminal execution demonstration
