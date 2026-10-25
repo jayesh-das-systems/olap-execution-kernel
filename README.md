@@ -34,6 +34,30 @@ Built from bare metal using POSIX system primitives, memory-mapped columnar layo
 
 ---
 
+## Scope & Execution Capabilities
+
+`olap-execution-kernel` is a specialized analytical query execution kernel designed for high-throughput single-pass columnar scans, vector filtering, and in-memory hash/array aggregations.
+
+### Supported Operators & Algebra
+
+| Category | Supported Primitives | Implementation Strategy |
+| :--- | :--- | :--- |
+| **Scans** | Sequential Columnar Scan | Zero-copy `mmap(2)` with `MAP_POPULATE` and `MADV_SEQUENTIAL`. |
+| **Selection / Filters** | Integer Range (`BETWEEN`, `>`, `<`), String Prefix matching | Branchless selection vector evaluation over 1024-element vectors. |
+| **Aggregations** | `SUM(val)`, `COUNT(*)`, `MIN(val)`, `MAX(val)` | Overflow-checked accumulator reduction via `std::expected<int64_t, ArithmeticError>`. |
+| **Group By** | Low-cardinality `CHAR(1)` / `INT8` | Direct array addressing ($O(1)$ flat indexing into 256-slot accumulators). |
+| | High-cardinality multi-key (`INT32`, string prefixes) | Open-address linear-probing hash table with power-of-two mask and Murmur/Fibonacci mixing. |
+| **Order By** | Ascending / Descending by Group Key or Aggregated Metric | In-memory sort over materialized accumulator buckets. |
+| **Stream Sliding Window** | Dynamic row spans `[head_idx, tail_idx)` | Zero-copy pointer manipulation with bitmask soft-deletes (`live_mask`). |
+
+### Input / Output Specifications
+
+* **Input Dataset Format**: Immutable binary columnar layout (`.bin`). Features a fixed 64-byte file header, 128-byte cacheline-padded column arrays (`int32`, `int64`, fixed-width `char[N]`), and packed tuple validity bit vectors.
+* **Output Format**: Streaming TSV (Tab-Separated Values) written to `stdout` via an optimized buffered emitter (`tsv_emitter.hpp`), or benchmark metadata to `stderr`.
+* **Out of Scope (By Design)**: Multi-table relational joins, SQL parsing/AST generation, disk spill-to-temp (all aggregations are purely resident in cache/DRAM), and distributed network sharding.
+
+---
+
 ## Performance Benchmarks
 
 Executed on standard Google Cloud virtualized hardware (Linux x86_64, single-threaded core, 244.38 MiB binary dataset, 10,000,000 rows):
