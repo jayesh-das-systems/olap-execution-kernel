@@ -9,6 +9,10 @@ An ultra-high-throughput, zero-copy OLAP vectorized query execution engine engin
 
 Built from bare metal using POSIX system primitives, memory-mapped columnar layouts, cacheline-aligned data structures, and branchless scalar/vectorized processing pipelines. Capable of sustaining **60+ M rows/sec on selective filter and aggregation workloads** on commodity multi-core hardware.
 
+<p align="center">
+  <img src="demo.gif" alt="OLAP Engine Correctness & Throughput Demo" width="850">
+</p>
+
 ---
 
 ## Key Architectural Highlights
